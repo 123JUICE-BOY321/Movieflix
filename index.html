@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>MovieFlix CLI</title>
+  <link rel="icon" type="image/png" href="Assets/Favicon.png">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm/css/xterm.css" />
+  <script src="https://cdn.jsdelivr.net/npm/xterm/lib/xterm.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit/lib/xterm-addon-fit.js"></script>
+  <script src="https://cdn.jsdelivr.net/pyodide/v0.25.0/full/pyodide.js"></script>
+  <style>
+    body { background: black; margin: 0; overflow: hidden;}
+    #terminal { width: 100vw; height: 100vh; padding-left: 20px; box-sizing: border-box;}
+  </style>
+</head>
+<body>
+  <div id="terminal"></div>
+  <script>
+    const term = new Terminal({ 
+        cursorBlink: true,
+        fontFamily: 'Courier New, monospace',
+        fontSize: 15
+    });
+    const fitAddon = new FitAddon.FitAddon();
+    term.loadAddon(fitAddon);
+    term.open(document.getElementById("terminal"));
+    fitAddon.fit();
+    window.onresize = () => fitAddon.fit();
+    window.term = term;
+    let pyodide;
+    let inputBuffer = "";
+    term.onData(d => {
+      if (d === "\r") { 
+        term.write("\r\n"); 
+        if(pyodide) {
+            try { pyodide.globals.get("feed_input")(inputBuffer); } catch(e) {}
+        }
+        inputBuffer = "";
+      } else if (d === "\u007F") { 
+        if (inputBuffer.length > 0) {
+          inputBuffer = inputBuffer.slice(0, -1);
+          term.write("\b \b");
+        }
+      } else {
+        inputBuffer += d;
+        term.write(d);
+      }
+    });
+    async function start() {
+      term.write("Initializing Terminal...\r\n");
+      pyodide = await loadPyodide();
+      await pyodide.loadPackage("sqlite3");
+      term.write("Loading Database...\r\n");
+
+      await pyodide.runPythonAsync(`
+import sys
+import asyncio
+import sqlite3
+import webbrowser
+from js import term
+
+class XtermWriter:
+    def write(self, data):
+        data = data.replace("\\n", "\\r\\n")
+        term.write(data)
+    def flush(self): pass
+
+sys.stdout = XtermWriter()
+sys.stderr = XtermWriter()
+
+_input_queue = []
+def feed_input(s): _input_queue.append(s)
+
+async def input(prompt=""):
+    print(prompt, end="") 
+    while not _input_queue:
+        await asyncio.sleep(0.1) 
+    return _input_queue.pop(0)
+
+C = sqlite3.connect(":memory:")
+cursor = C.cursor()
+cursor.execute('''CREATE TABLE IF NOT EXISTS Movies
+(
+    Mno INT PRIMARY KEY,
+    Name VARCHAR(100) NOT NULL,
+    Genre VARCHAR(20) NOT NULL,
+    Year INT NOT NULL,
+    Rating FLOAT NOT NULL,
+    MPA_Rating VARCHAR(5) NOT NULL,
+    Runtime VARCHAR(6) NOT NULL,
+    Premium VARCHAR(3) NOT NULL,
+    Movie_Link VARCHAR(2048) NOT NULL
+)
+''')
+cursor.execute('''CREATE TABLE IF NOT EXISTS Customers
+(
+    Cno INT PRIMARY KEY,
+    Username VARCHAR(255) NOT NULL,
+    Mobile_No INT NOT NULL,
+    E_Mail VARCHAR(320) NOT NULL,
+    Premium VARCHAR(3) NOT NULL,
+    Password VARCHAR(127) NOT NULL
+)
+''')
+
+movies_data = [
+    (1,'Interstellar','Sci-Fi',2014,8.6,'PG-13','2h 49m','Yes','https://www.youtube.com/watch?v=zSWdZVtXT7E'),
+    (2,'Bullet Train','Action',2022,7.3,'R','2h 07m','Yes','https://www.youtube.com/watch?v=0IOsk2Vlc4o'),
+    (3,'Top Gun: Maverick','Action',2022,8.4,'PG-13','2h 10m','Yes','https://www.youtube.com/watch?v=g4U4BQW9OEk'),
+    (4,'The Black Phone','Horror',2021,6.9,'R','1h 43m','Yes','https://www.youtube.com/watch?v=3eGP6im8AZA'),
+    (5,'Enola Holmes','Mystery',2020,6.6,'PG-13','2h 03m','No','https://www.youtube.com/watch?v=1d0Zf9sXlHk'),
+    (6,'Finding Nemo','Family',2003,8.2,'G','1h 40m','Yes','https://www.youtube.com/watch?v=SPHfeNgogVs'),
+    (7,'Godzilla: King of the Monsters','Sci-Fi',2019,6.0,'PG-13','2h 12m','Yes','https://www.youtube.com/watch?v=QFxN2oDKk0E'),
+    (8,'The Maze Runner','Sci-Fi',2014,6.8,'PG-13','1h 53m','No','https://www.youtube.com/watch?v=AwwbhhjQ9Xk'),
+    (9,'Fear Street Part One: 1994','Horror',2021,6.1,'R','1h 47m','No','https://www.youtube.com/watch?v=UyUuzCGblqc'),
+    (10,'Fear Street Part Two: 1978','Horror',2021,6.7,'R','1h 50m','No','https://www.youtube.com/watch?v=eR2KSY1fipo'),
+    (11,'Fear Street Part Three: 1666','Supernatural',2021,6.6,'R','1h 54m','No','https://www.youtube.com/watch?v=dj3CXY8rKuY'),
+    (12,'Black Panther: Wakanda Forever','Action',2022,7.3,'PG-13','2h 41m','Yes','https://www.youtube.com/watch?v=_Z3QKkl1WyM'),
+    (13,'Shang-Chi and the Legend of the Ten Rings','Action',2021,7.4,'PG-13','2h 12m','Yes','https://www.youtube.com/watch?v=giWIr7U1deA'),
+    (14,"Don't Worry Darling",'Thriller',2022,6.2,'R','2h 03m','No','https://www.youtube.com/watch?v=FgmnKsED-jU'),
+    (15,'Spider-Man: No Way Home','Action',2021,8.3,'PG-13','2h 28m','Yes','https://www.youtube.com/watch?v=Oh6T_iMvoRs'),
+    (16,'Halloween Ends','Horror',2022,5.0,'R','1h 51m','No','https://www.youtube.com/watch?v=s0vtbxLa-N8'),
+    (17,'Coco','Family',2017,8.4,'PG','1h 45m','No','https://www.youtube.com/watch?v=Rvr68u6k5sI'),
+    (18,'Godzilla vs. Kong','Sci-Fi',2021,6.3,'PG-13','1h 53m','No','https://www.youtube.com/watch?v=odM92ap8_c0'),
+    (19,'The Perks of Being a Wallflower','Romance',2012,7.9,'PG-13','1h 45m','No','https://www.youtube.com/watch?v=n5rh7O4IDc0'),
+    (20,'The Tomorrow War','Sci-Fi',2021,6.5,'PG-13','2h 20m','Yes','https://www.youtube.com/watch?v=LnIbOiskSdc')
+]
+cursor.executemany("INSERT INTO Movies VALUES (?,?,?,?,?,?,?,?,?)", movies_data)
+C.commit()
+
+isUserLoggedIn=False
+
+LOGO = '''
+█ █ █ █▀▀ █   █▀▀ █▀█ █▀▄▀█ █▀▀   ▀█▀ █▀█   █▀▄▀█ █▀█ █ █ █ █▀▀ █▀▀ █   █ ▀▄▀
+▀▄▀▄▀ ██▄ █▄▄ █▄▄ █▄█ █ ▀ █ ██▄    █  █▄█   █ ▀ █ █▄█ ▀▄▀ █ ██▄ █▀  █▄▄ █ █ █
+'''
+def Break():
+    print("="*100)
+
+def MaxLen(names):
+    if not names: return 0
+    return len(max(names, key=len))
+
+def MakeSpace(x):
+    return "".join([" " for i in range(max(0, x))])
+
+def PrintMovie(Squery):
+    SerialNos = []
+    Names = []
+    Genres = []
+    RDates = []
+    PGRates = []
+    Ratings = []
+    Durations = []
+    Premium=[]
+    cursor.execute(Squery)
+    _data = cursor.fetchall();
+    string = ""
+    for i in _data:
+        SerialNos.append(str(i[0]))
+        Names.append(i[1])
+        Genres.append(i[2])
+        RDates.append(str(i[3]))
+        Ratings.append(str(i[4]))
+        PGRates.append(i[5])
+        Durations.append(i[6])
+        Premium.append(i[7])
+    if not Names:
+        print("No records found.")
+        return
+    maxSNoLen = MaxLen(SerialNos)
+    maxNameLen = MaxLen(Names)
+    maxGenreLen = MaxLen(Genres)
+    maxRDateLen = MaxLen(RDates)
+    maxPGLen = MaxLen(PGRates)
+    maxRatingLen = MaxLen(Ratings)
+    maxDurations = MaxLen(Durations)
+    print(f"| M  | Movie Name{MakeSpace(maxNameLen - 10)} | Genre{MakeSpace(maxGenreLen - 5)} | Year{MakeSpace(maxRDateLen - 4)} | Ratings{MakeSpace(maxRatingLen - 7)} | PG Rating{MakeSpace(maxPGLen - 9)} | Duration{MakeSpace(maxDurations - 8)} | Premium    |\\n")
+    for i in range(len(Names)):
+        string += f"| {SerialNos[i]}{MakeSpace(maxSNoLen - len(str(SerialNos[i])))} | {Names[i]}{MakeSpace(maxNameLen - len(str(Names[i])))} | {Genres[i]}{MakeSpace(maxGenreLen - len(Genres[i]))} | {RDates[i]}{MakeSpace(maxRDateLen - len(str(RDates[i])))} | {Ratings[i]}{MakeSpace(maxRatingLen - len(str(Ratings[i])) + 4)} | {PGRates[i]}{MakeSpace(maxPGLen - len(PGRates[i]) + 4)} | {Durations[i]}{MakeSpace(maxDurations - len(Durations[i]) + 2)} | {Premium[i]}{MakeSpace(9 - len(Premium[i]))} |\\n"
+    print(string)
+        
+async def OpenLink(query):
+    cursor.execute(query)
+    _data = cursor.fetchall()
+    if not _data:
+        print("Movie not found.")
+        await HomePage()
+        return
+    if _data[0][1].lower()=="no":
+        webbrowser.open(_data[0][0]) 
+    elif _data[0][1].lower()=="yes" and isUserLoggedIn:
+        webbrowser.open(_data[0][0])
+    else:
+        print("\\nYou need to sign in to watch premium movies")
+        await StartPage()
+        return
+    await HomePage()
+
+async def StartPage():
+    Break()
+    global isUserLoggedIn
+    print(LOGO)
+    try:
+        Start_Input=int(await input('''
+    1) Sign in
+    2) Sign up
+    3) Guest Mode
+        Choose 1, 2, 3
+    '''))
+    except:
+        await StartPage()
+        return
+    if Start_Input==1:
+        Input_Username=await input("Enter Username:")
+        Input_Password=await input("Enter Password:")
+        cursor.execute("SELECT Username FROM Customers")
+        U=cursor.fetchall()
+        cursor.execute("SELECT Password FROM Customers")
+        P=cursor.fetchall()
+        u_list = [x[0] for x in U]
+        p_list = [x[0] for x in P]
+        if Input_Username in u_list and Input_Password in p_list:
+            isUserLoggedIn = True
+            await HomePage()
+        else:
+            print("Wrong Credentials...Try Again")
+            await StartPage()
+    if Start_Input==2:
+        cursor.execute("SELECT * FROM Customers")
+        Count=cursor.fetchall()
+        Calculate_Cno=len(Count) + 1
+        Input_Username=await input("Enter Username: ")
+        Input_Password=await input("Enter Password: ")
+        Input_Mobile_No=int(await input("Enter Mobile Number: "))
+        Input_E_Mail=await input("Enter E-Mail: ")
+        cursor.execute(f"INSERT INTO Customers VALUES({Calculate_Cno},'{Input_Username}',{Input_Mobile_No},'{Input_E_Mail}','No','{Input_Password}')")
+        C.commit()
+        await StartPage()
+    if Start_Input==3:
+        isUserLoggedIn = False
+        await HomePage()
+
+async def HomePage():
+    Break()
+    print(LOGO)
+    try:
+        User_Input=int(await input(f'''
+    1) All Movies
+    2) Latest Movies
+    3) Top Rated
+    4) Select Genre
+    5) Search Movies
+    6) Staff Mode
+        Choose 1,2,3,4,5,6        You Are Currently {"Signed In" if isUserLoggedIn else "Signed Out"}
+    '''))
+    except:
+        await HomePage()
+        return
+    Break()
+    if User_Input==1:
+        PrintMovie("SELECT Mno, Name, Genre, Year, Rating, MPA_Rating, Runtime, Premium FROM Movies ORDER BY Name")
+        Watch=await input("Enter the movie number you want to watch: ")
+        await OpenLink(f"SELECT Movie_Link, Premium FROM Movies WHERE Mno='{Watch}'")
+    if User_Input==2:
+        PrintMovie("SELECT Mno, Name, Genre, Year, Rating, MPA_Rating, Runtime, Premium FROM Movies ORDER BY Year DESC")
+        Watch=await input("Enter the movie number you want to watch: ")
+        await OpenLink(f"SELECT Movie_Link, Premium FROM Movies WHERE Mno='{Watch}'")
+    if User_Input==3:
+        PrintMovie("SELECT Mno, Name, Genre, Year, Rating, MPA_Rating, Runtime, Premium FROM Movies ORDER BY Rating DESC")
+        Watch=await input("Enter the movie number you want to watch: ")
+        await OpenLink(f"SELECT Movie_Link, Premium FROM Movies WHERE Mno='{Watch}'")
+    if User_Input==4:
+        cursor.execute("SELECT DISTINCT Genre FROM Movies ORDER BY Genre")
+        data = cursor.fetchall()
+        Genre_Input=await input("Select a Genre:\\n" + "".join([f"\\t{x[0]}\\n" for x in data]))
+        # Check if genre exists
+        flat_genres = [x[0] for x in data]
+        if Genre_Input in flat_genres:
+            PrintMovie(f"SELECT * FROM Movies WHERE Genre='{Genre_Input}'")
+        Watch=await input("Enter the movie number you want to watch: ")
+        await OpenLink(f"SELECT Movie_Link, Premium FROM Movies WHERE Mno='{Watch}'")
+    if User_Input==5:
+        Search_Input=await input("Search Movie Name: ")
+        cursor.execute("SELECT Name From Movies")
+        found = False
+        for i in cursor.fetchall():
+            if Search_Input.lower() == i[0].lower():
+                found = True
+                PrintMovie(f"SELECT Mno, Name, Genre, Year, Rating, MPA_Rating, Runtime, Premium FROM Movies WHERE Name = '{i[0]}'")
+                Watch=await input("Enter the movie number you want to watch: ")
+                await OpenLink(f"SELECT Movie_Link, Premium FROM Movies WHERE Mno='{Watch}'")
+                break
+        if not found:
+            print('''\\t  404 Error\\n\\tMovie not found''')
+            choice = await input("Would you like to add a movie? (y/n) ")
+            if choice.lower()=="y":
+                await input("Enter Movie Name: ")
+                print("Your movie has been sent to the moderators to verify")
+                await HomePage()
+            else:
+                await HomePage()
+    if User_Input==6:
+        pwd = await input("Enter Staff Password:")
+        if pwd == "Staff":
+            MN=int(await input('''\\t\\tWelcome Staff\\n\\tEnter number of movies you want to add: '''))
+            print('''Add movies in the form - INSERT INTO MOVIES VALUES(<Mno>,<Movie Name>,<Genre>,<Year>,<Rating>,<MPA Rating>,<Runtime>,<Premium>,<Movie Link>)''')
+            for i in range(MN):
+                Execute=await input("Execute: ")
+                try:
+                    cursor.execute(Execute)
+                    C.commit()
+                except Exception as e:
+                    print(f"Error executing SQL: {e}")
+            print("\\nAll movies entered!!!")
+            await HomePage()
+        else:
+            print("Wrong Staff Credentials")
+            await HomePage()
+
+await StartPage()
+`);
+    }
+    start();
+  </script>
+</body>
+</html>
